@@ -1,4 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+// ─── SUPABASE CONFIG ─────────────────────────────────────────────────────────
+// 🔑 Paste your Supabase Project URL and anon key here
+const SUPABASE_URL = "https://pxghupnhsgveolzvuiou.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB4Z2h1cG5oc2d2ZW9senZ1aW91Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzMjM3NTQsImV4cCI6MjA5Mzg5OTc1NH0.qzKmzU1L7yWszyuiY8xg-U6EVTwf-e0aKQBkcAlLa_M";
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ─── HERO SLIDES ─────────────────────────────────────────────────────────────
 const HERO_SLIDES = [
@@ -361,6 +368,216 @@ function ProductCard({ product, addToCart, wishlist, toggleWishlist }) {
   );
 }
 
+// ─── AUTH MODAL ──────────────────────────────────────────────────────────────
+function AuthModal({ mode, onClose, onSuccess, showToast }) {
+  const [tab, setTab] = useState(mode || "login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  const inputStyle = { width: "100%", padding: "12px 14px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 15, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 14 };
+  const btnStyle = (bg) => ({ width: "100%", padding: 14, background: bg, color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: "pointer", marginTop: 4 });
+
+  const handleLogin = async () => {
+    setErr(""); setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setLoading(false);
+    if (error) { setErr(error.message); return; }
+    showToast("✅ Welcome back!"); onSuccess();
+  };
+
+  const handleSignUp = async () => {
+    setErr(""); setLoading(true);
+    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: name } } });
+    setLoading(false);
+    if (error) { setErr(error.message); return; }
+    if (data.user) {
+      await supabase.from("profiles").upsert({ id: data.user.id, full_name: name, email });
+    }
+    showToast("✅ Account created! Check your email to confirm."); onSuccess();
+  };
+
+  const handleGoogle = async () => {
+    await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 400 }} />
+      <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", background: "#fff", borderRadius: 20, padding: 32, width: "min(420px,90vw)", zIndex: 401, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <span style={{ fontSize: 22, fontWeight: 900 }}>🍛 {tab === "login" ? "Sign In" : "Create Account"}</span>
+          <button onClick={onClose} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontSize: 16 }}>✕</button>
+        </div>
+        <div style={{ display: "flex", background: "#f5f5f5", borderRadius: 10, padding: 4, marginBottom: 20 }}>
+          {["login","signup"].map(t => (
+            <button key={t} onClick={() => { setTab(t); setErr(""); }} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: tab === t ? "#fff" : "transparent", fontWeight: tab === t ? 800 : 500, cursor: "pointer", boxShadow: tab === t ? "0 2px 8px rgba(0,0,0,0.1)" : "none", fontSize: 14 }}>
+              {t === "login" ? "Sign In" : "Sign Up"}
+            </button>
+          ))}
+        </div>
+        {tab === "signup" && <input style={inputStyle} placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} />}
+        <input style={inputStyle} placeholder="Email address" type="email" value={email} onChange={e => setEmail(e.target.value)} />
+        <input style={inputStyle} placeholder="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+        {err && <div style={{ color: "#c62828", fontSize: 13, marginBottom: 12, background: "#fce8e8", padding: "8px 12px", borderRadius: 8 }}>{err}</div>}
+        <button onClick={tab === "login" ? handleLogin : handleSignUp} disabled={loading} style={btnStyle("linear-gradient(135deg,#1e7e34,#28a745)")}>{loading ? "Please wait…" : tab === "login" ? "Sign In" : "Create Account"}</button>
+        <div style={{ textAlign: "center", margin: "14px 0", color: "#aaa", fontSize: 13 }}>— or —</div>
+        <button onClick={handleGoogle} style={{ ...btnStyle("#4285F4"), display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+          <img src="../c8fd260bd00730736bcd50bac2a6b6a5240f678d-removebg-preview.png" alt="Google" style={{ width: 20, height: 20 }} /> Continue with Google
+        </button>
+        {tab === "login" && <p style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: "#aaa" }}>Don't have an account? <span onClick={() => setTab("signup")} style={{ color: "#1e7e34", cursor: "pointer", fontWeight: 700 }}>Sign up free</span></p>}
+      </div>
+    </>
+  );
+}
+
+// ─── USER DASHBOARD ──────────────────────────────────────────────────────────
+function Dashboard({ user, onClose, onSignOut, showToast, cart, cartTotal }) {
+  const [profile, setProfile] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [editName, setEditName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("profiles").select("*").eq("id", user.id).single()
+      .then(({ data }) => { if (data) { setProfile(data); setEditName(data.full_name || ""); } });
+    supabase.from("orders").select("*").eq("user_id", user.id).order("created_at", { ascending: false })
+      .then(({ data }) => { if (data) setOrders(data); });
+  }, [user]);
+
+  const saveProfile = async () => {
+    setSaving(true);
+    await supabase.from("profiles").upsert({ id: user.id, full_name: editName, email: user.email });
+    await supabase.auth.updateUser({ data: { full_name: editName } });
+    setProfile(p => ({ ...p, full_name: editName }));
+    setSaving(false);
+    showToast("✅ Profile updated!");
+  };
+
+  const initials = (name) => name ? name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0,2) : "?";
+
+  const tabs = [
+    { id: "overview", label: "Overview", emoji: "🏠" },
+    { id: "orders", label: "Orders", emoji: "📦" },
+    { id: "profile", label: "Profile", emoji: "👤" },
+    { id: "wishlist", label: "Wishlist", emoji: "❤️" },
+  ];
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 400 }} />
+      <div style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: "min(480px,100vw)", background: "#f9fdf9", zIndex: 401, display: "flex", flexDirection: "column", boxShadow: "-4px 0 40px rgba(0,0,0,0.15)", overflowY: "auto" }}>
+        {/* Header */}
+        <div style={{ background: "linear-gradient(135deg,#1e7e34,#28a745)", padding: "28px 24px 20px", color: "#fff" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+            <span style={{ fontWeight: 900, fontSize: 18 }}>🍛 My Account</span>
+            <button onClick={onClose} style={{ background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 8, padding: "6px 10px", color: "#fff", cursor: "pointer", fontSize: 16 }}>✕</button>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(255,255,255,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 900, flexShrink: 0 }}>
+              {initials(profile?.full_name || user?.email || "")}
+            </div>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 18 }}>{profile?.full_name || "NaijaBite Customer"}</div>
+              <div style={{ fontSize: 13, opacity: 0.85 }}>{user?.email}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Tab Nav */}
+        <div style={{ display: "flex", background: "#fff", borderBottom: "2px solid #e8f5e9", padding: "0 8px" }}>
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ flex: 1, padding: "12px 4px", border: "none", background: "transparent", borderBottom: activeTab === t.id ? "3px solid #1e7e34" : "3px solid transparent", fontWeight: activeTab === t.id ? 800 : 500, color: activeTab === t.id ? "#1e7e34" : "#888", cursor: "pointer", fontSize: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+              <span style={{ fontSize: 18 }}>{t.emoji}</span>{t.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ flex: 1, padding: 20 }}>
+          {/* Overview */}
+          {activeTab === "overview" && (
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+                {[
+                  { label: "Total Orders", val: orders.length, emoji: "📦" },
+                  { label: "Cart Items", val: cart.reduce((s,i) => s+i.qty,0), emoji: "🛒" },
+                  { label: "Cart Value", val: `£${cartTotal.toFixed(2)}`, emoji: "💷" },
+                  { label: "Member Since", val: new Date(user?.created_at || Date.now()).toLocaleDateString("en-GB",{month:"short",year:"numeric"}), emoji: "🗓️" },
+                ].map(({ label, val, emoji }) => (
+                  <div key={label} style={{ background: "#fff", borderRadius: 14, padding: 16, border: "1.5px solid #e8f5e9", textAlign: "center" }}>
+                    <div style={{ fontSize: 24, marginBottom: 6 }}>{emoji}</div>
+                    <div style={{ fontWeight: 900, fontSize: 20, color: "#1e7e34" }}>{val}</div>
+                    <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ background: "linear-gradient(135deg,#e8f5e9,#f1f8e9)", borderRadius: 16, padding: 20, border: "1.5px solid #c8e6c9" }}>
+                <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>🎉 Welcome to NaijaBite!</div>
+                <p style={{ fontSize: 14, color: "#555", margin: 0, lineHeight: 1.6 }}>Enjoy authentic Nigerian & African food delivered to your door. Free delivery on orders over £35.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Orders */}
+          {activeTab === "orders" && (
+            <div>
+              <h3 style={{ fontWeight: 800, fontSize: 18, marginBottom: 16 }}>📦 Order History</h3>
+              {orders.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px 20px", color: "#bbb" }}>
+                  <div style={{ fontSize: 48, marginBottom: 12 }}>📦</div>
+                  <div style={{ fontWeight: 700 }}>No orders yet</div>
+                  <div style={{ fontSize: 14, marginTop: 8 }}>Start shopping to see your orders here!</div>
+                </div>
+              ) : orders.map(o => (
+                <div key={o.id} style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 12, border: "1.5px solid #e8f5e9" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>Order #{o.id?.slice(0,8)}</span>
+                    <span style={{ background: "#e8f5e9", color: "#1e7e34", borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>{o.status || "Processing"}</span>
+                  </div>
+                  <div style={{ color: "#888", fontSize: 13 }}>{new Date(o.created_at).toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})}</div>
+                  <div style={{ fontWeight: 800, color: "#1e7e34", marginTop: 6 }}>£{o.total?.toFixed(2)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Profile */}
+          {activeTab === "profile" && (
+            <div>
+              <h3 style={{ fontWeight: 800, fontSize: 18, marginBottom: 16 }}>👤 My Profile</h3>
+              <div style={{ background: "#fff", borderRadius: 14, padding: 20, border: "1.5px solid #e8f5e9", marginBottom: 16 }}>
+                <label style={{ display: "block", fontWeight: 700, marginBottom: 6, fontSize: 14 }}>Full Name</label>
+                <input value={editName} onChange={e => setEditName(e.target.value)} style={{ width: "100%", padding: "12px 14px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 15, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 16 }} placeholder="Your full name" />
+                <label style={{ display: "block", fontWeight: 700, marginBottom: 6, fontSize: 14 }}>Email Address</label>
+                <input value={user?.email || ""} disabled style={{ width: "100%", padding: "12px 14px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 15, fontFamily: "inherit", background: "#f9f9f9", boxSizing: "border-box", marginBottom: 16 }} />
+                <button onClick={saveProfile} disabled={saving} style={{ background: "linear-gradient(135deg,#1e7e34,#28a745)", color: "#fff", border: "none", borderRadius: 12, padding: "12px 24px", fontWeight: 800, cursor: "pointer", fontSize: 15 }}>{saving ? "Saving…" : "Save Changes"}</button>
+              </div>
+            </div>
+          )}
+
+          {/* Wishlist tab */}
+          {activeTab === "wishlist" && (
+            <div style={{ textAlign: "center", padding: "40px 20px", color: "#bbb" }}>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>❤️</div>
+              <div style={{ fontWeight: 700 }}>Your wishlist</div>
+              <div style={{ fontSize: 14, marginTop: 8 }}>Items you heart on the shop page appear here.</div>
+            </div>
+          )}
+        </div>
+
+        {/* Sign Out */}
+        <div style={{ padding: 20, borderTop: "1.5px solid #e8f5e9" }}>
+          <button onClick={onSignOut} style={{ width: "100%", padding: 14, background: "#fce8e8", color: "#c62828", border: "1.5px solid #f5c6c6", borderRadius: 12, fontWeight: 800, cursor: "pointer", fontSize: 15 }}>🚪 Sign Out</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function NaijaBite() {
   const [page, setPage] = useState("home");
@@ -377,6 +594,28 @@ export default function NaijaBite() {
   const [storesLoading, setStoresLoading] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [orderDone, setOrderDone] = useState(false);
+  // ── Auth state ──
+  const [authUser, setAuthUser] = useState(null);
+  const [authModal, setAuthModal] = useState(null); // null | "login" | "signup"
+  const [dashOpen, setDashOpen] = useState(false);
+
+  // Listen for Supabase auth changes
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAuthUser(session?.user ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setAuthUser(null);
+    setDashOpen(false);
+    showToast("👋 Signed out. See you soon!");
+  };
 
   const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 2600); };
   const nav = (p) => { setPage(p); setMobileMenuOpen(false); window.scrollTo(0, 0); };
@@ -825,6 +1064,17 @@ export default function NaijaBite() {
             ))}
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            {/* Auth: show Login/Sign Up OR profile avatar */}
+            {authUser ? (
+              <button onClick={() => setDashOpen(true)} title="My Account" style={{ width: 40, height: 40, borderRadius: "50%", background: "linear-gradient(135deg,#1e7e34,#28a745)", color: "#fff", border: "none", cursor: "pointer", fontWeight: 900, fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {(authUser.user_metadata?.full_name || authUser.email || "?").split(" ").map(n => n[0]).join("").toUpperCase().slice(0,2)}
+              </button>
+            ) : (
+              <div style={{ display: "flex", gap: 8 }} className="dnav">
+                <button onClick={() => setAuthModal("login")} style={{ padding: "9px 16px", borderRadius: 10, border: "1.5px solid #1e7e34", background: "transparent", color: "#1e7e34", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>Sign In</button>
+                <button onClick={() => setAuthModal("signup")} style={{ padding: "9px 16px", borderRadius: 10, border: "none", background: "#1e7e34", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>Sign Up</button>
+              </div>
+            )}
             <button onClick={() => setCartOpen(true)} style={{ position: "relative", background: "#1e7e34", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 700, fontSize: 15 }}>
               <Icon name="cart" size={18} /> Cart
               {cartCount > 0 && <span style={{ position: "absolute", top: -7, right: -7, background: "#f4c430", color: "#1a1a1a", borderRadius: "50%", width: 21, height: 21, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900 }}>{cartCount}</span>}
@@ -846,6 +1096,17 @@ export default function NaijaBite() {
                 {label}
               </button>
             ))}
+            {!authUser && (
+              <div style={{ display: "flex", gap: 8, padding: "8px 0" }}>
+                <button onClick={() => { setMobileMenuOpen(false); setAuthModal("login"); }} style={{ flex: 1, padding: 12, border: "1.5px solid #1e7e34", background: "transparent", color: "#1e7e34", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>Sign In</button>
+                <button onClick={() => { setMobileMenuOpen(false); setAuthModal("signup"); }} style={{ flex: 1, padding: 12, border: "none", background: "#1e7e34", color: "#fff", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>Sign Up</button>
+              </div>
+            )}
+            {authUser && (
+              <button onClick={() => { setMobileMenuOpen(false); setDashOpen(true); }} style={{ padding: "12px 16px", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 16, color: "#1e7e34", background: "#e8f5e9", border: "none", textAlign: "left" }}>
+                👤 My Account
+              </button>
+            )}
           </div>
         </>
       )}
@@ -939,6 +1200,28 @@ export default function NaijaBite() {
 
       {/* Checkout Modal */}
       {checkoutOpen && renderCheckout()}
+
+      {/* Auth Modal */}
+      {authModal && (
+        <AuthModal
+          mode={authModal}
+          onClose={() => setAuthModal(null)}
+          onSuccess={() => setAuthModal(null)}
+          showToast={showToast}
+        />
+      )}
+
+      {/* User Dashboard */}
+      {dashOpen && authUser && (
+        <Dashboard
+          user={authUser}
+          onClose={() => setDashOpen(false)}
+          onSignOut={handleSignOut}
+          showToast={showToast}
+          cart={cart}
+          cartTotal={cartTotal}
+        />
+      )}
 
       {/* Toast */}
       {toastMsg && (
