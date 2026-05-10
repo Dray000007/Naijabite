@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+// ⚠️  Run:  npm install @supabase/supabase-js
+import { createClient } from "@supabase/supabase-js";
 
 // ─── SUPABASE CONFIG ─────────────────────────────────────────────────────────
 // 🔑 Paste your Supabase Project URL and anon key here
@@ -157,6 +158,75 @@ const proxyImg = (url) => {
   return `https://images.weserv.nl/?url=${encodeURIComponent(url)}&w=1600&fit=cover&_cb=${bust}`;
 };
 
+const getInitials = (name) =>
+  name ? name.split(" ").filter(Boolean).map(n => n[0]).join("").toUpperCase().slice(0, 2) : "?";
+
+const displayNameFromUser = (user, profile = null) =>
+  profile?.full_name || user?.user_metadata?.full_name || user?.email?.split("@")[0] || "NaijaBite Customer";
+
+const profileStorageKey = (userId) => `naijabite_profile_${userId}`;
+
+const readLocalProfile = (userId) => {
+  if (!userId) return {};
+  try {
+    return JSON.parse(localStorage.getItem(profileStorageKey(userId)) || "{}");
+  } catch {
+    return {};
+  }
+};
+
+const saveLocalProfile = (userId, patch) => {
+  const next = { ...readLocalProfile(userId), ...patch };
+  localStorage.setItem(profileStorageKey(userId), JSON.stringify(next));
+  return next;
+};
+
+const fileToDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+const AFRICAN_STORE_KEYWORDS = [
+  "african", "afro", "nigeria", "nigerian", "naija", "lagos", "ghana", "ghanaian",
+  "caribbean", "jamaican", "tropical", "world food", "world foods", "ethnic",
+  "halal", "plantain", "yam", "cassava", "garri", "egusi", "suya", "pepper soup",
+  "pounded yam", "stockfish", "palm oil", "spice", "spices", "market", "foods",
+  "food store", "grocery", "supermarket", "cash and carry"
+];
+
+const FOOD_SHOP_TYPES = ["supermarket", "convenience", "grocery", "deli", "general", "greengrocer", "butcher", "seafood", "spices"];
+
+const storeText = (parts) => parts.filter(Boolean).join(" ").toLowerCase();
+
+const isRelevantFoodStore = (store, query = "") => {
+  const text = storeText([
+    store.name,
+    store.address,
+    store.category,
+    store.shop,
+    store.cuisine,
+    store.description,
+    Array.isArray(store.tags) ? store.tags.join(" ") : store.tags,
+  ]);
+  const wanted = query.trim().toLowerCase();
+  const hasAfricanSignal = AFRICAN_STORE_KEYWORDS.some(k => text.includes(k));
+  const matchesQuery = !wanted || wanted.split(/\s+/).some(word => word.length > 2 && text.includes(word));
+  return hasAfricanSignal && matchesQuery;
+};
+
+const mergeStores = (stores) => {
+  const seen = new Set();
+  return stores.filter((s) => {
+    const key = `${String(s.name || "").toLowerCase()}|${Number(s.lat).toFixed(4)}|${Number(s.lon).toFixed(4)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return Number.isFinite(Number(s.lat)) && Number.isFinite(Number(s.lon));
+  });
+};
+
 // ─── ICON ─────────────────────────────────────────────────────────────────────
 const Icon = ({ name, size = 20 }) => {
   const icons = {
@@ -179,6 +249,104 @@ const Icon = ({ name, size = 20 }) => {
   };
   return icons[name] || null;
 };
+
+function LeafletStoreMap({ userLocation, stores, loading, onUseLocation }) {
+  const mapEl = useRef(null);
+  const mapRef = useRef(null);
+  const layerRef = useRef(null);
+  const leafletRef = useRef(null);
+  const [mapError, setMapError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadMap = async () => {
+      try {
+        const leafletModule = await import("leaflet");
+        await import("leaflet/dist/leaflet.css");
+        if (cancelled || !mapEl.current || mapRef.current) return;
+        const L = leafletModule.default || leafletModule;
+        leafletRef.current = L;
+        const start = userLocation ? [userLocation.lat, userLocation.lng] : [51.5074, -0.1278];
+        mapRef.current = L.map(mapEl.current, { scrollWheelZoom: false }).setView(start, userLocation ? 13 : 10);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        }).addTo(mapRef.current);
+        layerRef.current = L.layerGroup().addTo(mapRef.current);
+      } catch (err) {
+        console.error("Leaflet load error:", err);
+        setMapError("Install Leaflet to show the live map.");
+      }
+    };
+    loadMap();
+    return () => {
+      cancelled = true;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const L = leafletRef.current;
+    const map = mapRef.current;
+    const layer = layerRef.current;
+    if (!L || !map || !layer) return;
+
+    layer.clearLayers();
+    const points = [];
+    const makeIcon = (bg, label) => L.divIcon({
+      className: "",
+      html: `<div style="width:34px;height:34px;border-radius:50%;background:${bg};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;border:3px solid #fff;box-shadow:0 5px 18px rgba(0,0,0,.28);">${label}</div>`,
+      iconSize: [34, 34],
+      iconAnchor: [17, 17],
+    });
+
+    if (userLocation) {
+      const userPoint = [userLocation.lat, userLocation.lng];
+      points.push(userPoint);
+      L.marker(userPoint, { icon: makeIcon("#1e7e34", "You") })
+        .bindPopup("<strong>Your location</strong>")
+        .addTo(layer);
+    }
+
+    stores.forEach((store) => {
+      const point = [Number(store.lat), Number(store.lon)];
+      points.push(point);
+      L.marker(point, { icon: makeIcon(store.source === "supabase" ? "#b8930a" : "#e05c1a", "🍲") })
+        .bindPopup(`<strong>${store.name}</strong><br>${store.address || "Address unavailable"}<br>${store.distance || ""}`)
+        .addTo(layer);
+    });
+
+    if (points.length > 1) {
+      map.fitBounds(L.latLngBounds(points), { padding: [34, 34], maxZoom: 15 });
+    } else if (points.length === 1) {
+      map.setView(points[0], 13);
+    }
+  }, [userLocation, stores]);
+
+  return (
+    <div style={{ position: "relative", height: "clamp(360px, 52vh, 560px)", borderRadius: 18, overflow: "hidden", border: "1.5px solid #c8e6c9", background: "#e8f5e9", marginBottom: 24 }}>
+      <div ref={mapEl} style={{ width: "100%", height: "100%" }} />
+      {!userLocation && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", background: "linear-gradient(180deg,rgba(249,253,249,0.72),rgba(249,253,249,0.36))" }}>
+          <div style={{ background: "#fff", border: "1.5px solid #e8f5e9", borderRadius: 14, padding: 18, textAlign: "center", maxWidth: 330, boxShadow: "0 12px 32px rgba(0,0,0,0.12)" }}>
+            <div style={{ fontSize: 34, marginBottom: 8 }}>📍</div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Use your location</div>
+            <div style={{ color: "#666", fontSize: 13, lineHeight: 1.55 }}>The map will show African food stores closest to you.</div>
+          </div>
+        </div>
+      )}
+      {mapError && (
+        <div style={{ position: "absolute", left: 14, bottom: 14, background: "#fff8dc", color: "#7a5a00", border: "1.5px solid #f4e3a0", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 700 }}>{mapError}</div>
+      )}
+      <button onClick={onUseLocation} disabled={loading}
+        style={{ position: "absolute", top: 14, right: 14, background: "#1e7e34", color: "#fff", border: "none", borderRadius: 12, padding: "11px 16px", fontSize: 14, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.18)" }}>
+        <Icon name="locate" size={17} />{loading ? "Locating..." : userLocation ? "Update Location" : "Use My Location"}
+      </button>
+    </div>
+  );
+}
 
 // ─── HERO SLIDESHOW ───────────────────────────────────────────────────────────
 function HeroSlideshow({ onNav }) {
@@ -369,23 +537,32 @@ function ProductCard({ product, addToCart, wishlist, toggleWishlist }) {
 }
 
 // ─── AUTH MODAL ──────────────────────────────────────────────────────────────
-function AuthModal({ mode, onClose, onSuccess, showToast }) {
-  const [tab, setTab] = useState(mode || "login");
+function AuthModal({ mode, onClose, onSuccess, showToast, onForgotPassword }) {
+  const [tab, setTab] = useState(mode === "reset-password" ? "reset-password" : mode || "login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [name, setName] = useState("");
+  const [keepLogged, setKeepLogged] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const title = {
+    login: "Sign In",
+    signup: "Create Account",
+    forgot: "Reset Password",
+    "reset-password": "Choose New Password",
+  }[tab] || "Sign In";
 
   const inputStyle = { width: "100%", padding: "12px 14px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 15, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 14 };
   const btnStyle = (bg) => ({ width: "100%", padding: 14, background: bg, color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: "pointer", marginTop: 4 });
 
   const handleLogin = async () => {
     setErr(""); setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (error) { setErr(error.message); return; }
-    showToast("✅ Welcome back!"); onSuccess();
+    try { if (keepLogged) localStorage.setItem("keepLogged", "1"); else localStorage.removeItem("keepLogged"); } catch {}
+    showToast("✅ Welcome back!"); onSuccess(data?.user ?? null);
   };
 
   const handleSignUp = async () => {
@@ -394,13 +571,45 @@ function AuthModal({ mode, onClose, onSuccess, showToast }) {
     setLoading(false);
     if (error) { setErr(error.message); return; }
     if (data.user) {
+      saveLocalProfile(data.user.id, { full_name: name, email });
       await supabase.from("profiles").upsert({ id: data.user.id, full_name: name, email });
     }
-    showToast("✅ Account created! Check your email to confirm."); onSuccess();
+    try { if (keepLogged) localStorage.setItem("keepLogged", "1"); else localStorage.removeItem("keepLogged"); } catch {}
+    if (data?.session && data?.user) {
+      showToast("✅ Account created!");
+      onSuccess(data.user);
+      return;
+    }
+    showToast("✅ Account created! Check your email to confirm.");
+    onClose();
   };
 
   const handleGoogle = async () => {
     await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
+  };
+
+  const handleResetRequest = async () => {
+    setErr("");
+    if (!email) { setErr("Enter your email address first."); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/?page=reset-password`,
+    });
+    setLoading(false);
+    if (error) { setErr(error.message); return; }
+    showToast("✅ Password reset link sent. Check your email.");
+    setTab("login");
+  };
+
+  const handlePasswordUpdate = async () => {
+    setErr("");
+    if (newPassword.length < 6) { setErr("Password must be at least 6 characters."); return; }
+    setLoading(true);
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+    setLoading(false);
+    if (error) { setErr(error.message); return; }
+    showToast("✅ Password updated!");
+    onSuccess(data?.user ?? null);
   };
 
   return (
@@ -408,9 +617,10 @@ function AuthModal({ mode, onClose, onSuccess, showToast }) {
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 400 }} />
       <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", background: "#fff", borderRadius: 20, padding: 32, width: "min(420px,90vw)", zIndex: 401, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-          <span style={{ fontSize: 22, fontWeight: 900 }}>🍛 {tab === "login" ? "Sign In" : "Create Account"}</span>
+          <span style={{ fontSize: 22, fontWeight: 900 }}>🍛 {title}</span>
           <button onClick={onClose} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontSize: 16 }}>✕</button>
         </div>
+        {tab !== "reset-password" && (
         <div style={{ display: "flex", background: "#f5f5f5", borderRadius: 10, padding: 4, marginBottom: 20 }}>
           {["login","signup"].map(t => (
             <button key={t} onClick={() => { setTab(t); setErr(""); }} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: tab === t ? "#fff" : "transparent", fontWeight: tab === t ? 800 : 500, cursor: "pointer", boxShadow: tab === t ? "0 2px 8px rgba(0,0,0,0.1)" : "none", fontSize: 14 }}>
@@ -418,15 +628,40 @@ function AuthModal({ mode, onClose, onSuccess, showToast }) {
             </button>
           ))}
         </div>
+        )}
         {tab === "signup" && <input style={inputStyle} placeholder="Full Name" value={name} onChange={e => setName(e.target.value)} />}
-        <input style={inputStyle} placeholder="Email address" type="email" value={email} onChange={e => setEmail(e.target.value)} />
-        <input style={inputStyle} placeholder="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+        {tab !== "reset-password" && <input style={inputStyle} placeholder="Email address" type="email" value={email} onChange={e => setEmail(e.target.value)} />}
+        {(tab === "login" || tab === "signup") && <input style={inputStyle} placeholder="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} />}
+        {(tab === "login" || tab === "signup") && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0 12px' }}>
+            <input type="checkbox" checked={keepLogged} onChange={e => setKeepLogged(e.target.checked)} />
+            <span style={{ fontSize: 13 }}>Keep me logged in</span>
+          </label>
+        )}
+        {tab === "login" && (
+          <button onClick={() => { if (onForgotPassword) onForgotPassword(); else { setTab("forgot"); setErr(""); } }} style={{ background: "transparent", border: "none", color: "#1e7e34", fontWeight: 800, fontSize: 13, cursor: "pointer", margin: "-4px 0 14px auto", display: "block" }}>
+            Forgot password?
+          </button>
+        )}
+        {tab === "forgot" && <p style={{ color: "#666", fontSize: 14, lineHeight: 1.6, margin: "0 0 14px" }}>Enter your account email and Supabase will send you a secure password reset link.</p>}
+        {tab === "reset-password" && <input style={inputStyle} placeholder="New password" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} />}
         {err && <div style={{ color: "#c62828", fontSize: 13, marginBottom: 12, background: "#fce8e8", padding: "8px 12px", borderRadius: 8 }}>{err}</div>}
-        <button onClick={tab === "login" ? handleLogin : handleSignUp} disabled={loading} style={btnStyle("linear-gradient(135deg,#1e7e34,#28a745)")}>{loading ? "Please wait…" : tab === "login" ? "Sign In" : "Create Account"}</button>
-        <div style={{ textAlign: "center", margin: "14px 0", color: "#aaa", fontSize: 13 }}>— or —</div>
-        <button onClick={handleGoogle} style={{ ...btnStyle("#4285F4"), display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-          <img src="../c8fd260bd00730736bcd50bac2a6b6a5240f678d-removebg-preview.png" alt="Google" style={{ width: 20, height: 20 }} /> Continue with Google
+        <button
+          onClick={tab === "login" ? handleLogin : tab === "signup" ? handleSignUp : tab === "forgot" ? handleResetRequest : handlePasswordUpdate}
+          disabled={loading}
+          style={btnStyle("linear-gradient(135deg,#1e7e34,#28a745)")}
+        >
+          {loading ? "Please wait…" : tab === "login" ? "Sign In" : tab === "signup" ? "Create Account" : tab === "forgot" ? "Send Reset Link" : "Update Password"}
         </button>
+        {(tab === "login" || tab === "signup") && (
+          <>
+            <div style={{ textAlign: "center", margin: "14px 0", color: "#aaa", fontSize: 13 }}>— or —</div>
+            <button onClick={handleGoogle} style={{ ...btnStyle("#4285F4"), display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+              <img src="../c8fd260bd00730736bcd50bac2a6b6a5240f678d-removebg-preview.png" alt="Google" style={{ width: 20, height: 20 }} /> Continue with Google
+            </button>
+          </>
+        )}
+        {tab === "forgot" && <p style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: "#aaa" }}>Remembered it? <span onClick={() => setTab("login")} style={{ color: "#1e7e34", cursor: "pointer", fontWeight: 700 }}>Back to sign in</span></p>}
         {tab === "login" && <p style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: "#aaa" }}>Don't have an account? <span onClick={() => setTab("signup")} style={{ color: "#1e7e34", cursor: "pointer", fontWeight: 700 }}>Sign up free</span></p>}
       </div>
     </>
@@ -434,56 +669,104 @@ function AuthModal({ mode, onClose, onSuccess, showToast }) {
 }
 
 // ─── USER DASHBOARD ──────────────────────────────────────────────────────────
-function Dashboard({ user, onClose, onSignOut, showToast, cart, cartTotal }) {
-  const [profile, setProfile] = useState(null);
+function Dashboard({ user, onClose, onSignOut, showToast, cart, cartTotal, onProfileUpdate, wishlist = [], embedded = false }) {
+  const localProfile = { email: user?.email, full_name: displayNameFromUser(user), ...readLocalProfile(user?.id) };
+  const [profile, setProfile] = useState(localProfile);
   const [orders, setOrders] = useState([]);
   const [activeTab, setActiveTab] = useState("overview");
-  const [editName, setEditName] = useState("");
+  const [editName, setEditName] = useState(localProfile.full_name || "");
+  const [settings, setSettings] = useState({ promos: true, sms: false, deliveryNotes: "" });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!user) return;
+    const fallbackProfile = { email: user.email, full_name: displayNameFromUser(user), ...readLocalProfile(user.id) };
+    setProfile(fallbackProfile);
+    setEditName(fallbackProfile.full_name || "");
     supabase.from("profiles").select("*").eq("id", user.id).single()
-      .then(({ data }) => { if (data) { setProfile(data); setEditName(data.full_name || ""); } });
+      .then(({ data }) => {
+        if (data) {
+          const merged = { ...fallbackProfile, ...data };
+          setProfile(merged);
+          setEditName(merged.full_name || "");
+          saveLocalProfile(user.id, merged);
+          if (onProfileUpdate) onProfileUpdate(merged);
+        } else if (onProfileUpdate) {
+          onProfileUpdate(fallbackProfile);
+        }
+      });
     supabase.from("orders").select("*").eq("user_id", user.id).order("created_at", { ascending: false })
       .then(({ data }) => { if (data) setOrders(data); });
   }, [user]);
 
   const saveProfile = async () => {
     setSaving(true);
+    const nextProfile = saveLocalProfile(user.id, { ...profile, full_name: editName, email: user.email });
+    setProfile(nextProfile);
+    if (onProfileUpdate) onProfileUpdate(nextProfile);
     await supabase.from("profiles").upsert({ id: user.id, full_name: editName, email: user.email });
     await supabase.auth.updateUser({ data: { full_name: editName } });
-    setProfile(p => ({ ...p, full_name: editName }));
     setSaving(false);
     showToast("✅ Profile updated!");
   };
 
-  const initials = (name) => name ? name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0,2) : "?";
+  const uploadAvatar = async (file) => {
+    if (!file) return;
+    showToast("Uploading profile photo…");
+    const localUrl = await fileToDataUrl(file);
+    const localNext = saveLocalProfile(user.id, { ...profile, avatar_url: localUrl });
+    setProfile(localNext);
+    if (onProfileUpdate) onProfileUpdate(localNext);
+    const path = `avatars/${user.id}/${Date.now()}_${file.name}`;
+    const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
+    if (uploadErr) { showToast("✅ Profile photo saved on this device"); return; }
+    const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path);
+    const url = urlData.publicUrl;
+    await supabase.from("profiles").upsert({ id: user.id, avatar_url: url }, { returning: "representation" });
+    const nextProfile = saveLocalProfile(user.id, { ...localNext, avatar_url: url });
+    setProfile(nextProfile);
+    if (onProfileUpdate) onProfileUpdate(nextProfile);
+    showToast("✅ Profile photo updated!");
+  };
 
   const tabs = [
     { id: "overview", label: "Overview", emoji: "🏠" },
     { id: "orders", label: "Orders", emoji: "📦" },
     { id: "profile", label: "Profile", emoji: "👤" },
     { id: "wishlist", label: "Wishlist", emoji: "❤️" },
+    { id: "settings", label: "Settings", emoji: "⚙️" },
   ];
+  const wishedProducts = PRODUCTS.filter(p => wishlist.includes(p.id));
 
   return (
     <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 400 }} />
-      <div style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: "min(480px,100vw)", background: "#f9fdf9", zIndex: 401, display: "flex", flexDirection: "column", boxShadow: "-4px 0 40px rgba(0,0,0,0.15)", overflowY: "auto" }}>
+      {!embedded && <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 400 }} />}
+      <div style={embedded
+        ? { maxWidth: 1100, margin: "0 auto", padding: "32px 20px 56px", background: "#f9fdf9" }
+        : { position: "fixed", top: 0, right: 0, height: "100vh", width: "min(480px,100vw)", background: "#f9fdf9", zIndex: 401, display: "flex", flexDirection: "column", boxShadow: "-4px 0 40px rgba(0,0,0,0.15)", overflowY: "auto" }
+      }>
         {/* Header */}
-        <div style={{ background: "linear-gradient(135deg,#1e7e34,#28a745)", padding: "28px 24px 20px", color: "#fff" }}>
+        <div style={{ background: "linear-gradient(135deg,#1e7e34,#28a745)", padding: "28px 24px 20px", color: "#fff", borderRadius: embedded ? 18 : 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-            <span style={{ fontWeight: 900, fontSize: 18 }}>🍛 My Account</span>
-            <button onClick={onClose} style={{ background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 8, padding: "6px 10px", color: "#fff", cursor: "pointer", fontSize: 16 }}>✕</button>
+            <span style={{ fontWeight: 900, fontSize: 18 }}>🍛 My Account Dashboard</span>
+            {!embedded && <button onClick={onClose} style={{ background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 8, padding: "6px 10px", color: "#fff", cursor: "pointer", fontSize: 16 }}>✕</button>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(255,255,255,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 900, flexShrink: 0 }}>
-              {initials(profile?.full_name || user?.email || "")}
-            </div>
+            <label style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(255,255,255,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 900, flexShrink: 0, overflow: "hidden", cursor: "pointer", border: "2px solid rgba(255,255,255,0.65)", position: "relative" }} title="Upload profile photo">
+              {profile?.avatar_url ? (
+                <img src={profile.avatar_url} alt="Profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                getInitials(profile?.full_name || user?.email || "")
+              )}
+              <input type="file" accept="image/*" onChange={e => uploadAvatar(e.target.files[0])} style={{ display: "none" }} />
+            </label>
             <div>
-              <div style={{ fontWeight: 800, fontSize: 18 }}>{profile?.full_name || "NaijaBite Customer"}</div>
+              <div style={{ fontWeight: 800, fontSize: 18 }}>{displayNameFromUser(user, profile)}</div>
               <div style={{ fontSize: 13, opacity: 0.85 }}>{user?.email}</div>
+              <label style={{ display: "inline-block", marginTop: 8, background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 20, padding: "6px 11px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
+                Change Photo
+                <input type="file" accept="image/*" onChange={e => uploadAvatar(e.target.files[0])} style={{ display: "none" }} />
+              </label>
             </div>
           </div>
         </div>
@@ -554,6 +837,16 @@ function Dashboard({ user, onClose, onSignOut, showToast, cart, cartTotal }) {
                 <input value={editName} onChange={e => setEditName(e.target.value)} style={{ width: "100%", padding: "12px 14px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 15, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 16 }} placeholder="Your full name" />
                 <label style={{ display: "block", fontWeight: 700, marginBottom: 6, fontSize: 14 }}>Email Address</label>
                 <input value={user?.email || ""} disabled style={{ width: "100%", padding: "12px 14px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 15, fontFamily: "inherit", background: "#f9f9f9", boxSizing: "border-box", marginBottom: 16 }} />
+                <label style={{ display: "block", fontWeight: 700, marginBottom: 6, fontSize: 14 }}>Profile Picture</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                  <div style={{ width: 56, height: 56, borderRadius: "50%", overflow: "hidden", background: "#f5f5f5", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {profile?.avatar_url ? <img src={profile.avatar_url} alt="avatar" style={{ width: 56, height: 56, objectFit: "cover" }} /> : <div style={{ fontWeight: 900 }}>{getInitials(profile?.full_name || user?.email)}</div>}
+                  </div>
+                  <label style={{ background: "#f1f8e9", color: "#1e7e34", border: "1.5px solid #c8e6c9", borderRadius: 10, padding: "10px 14px", fontWeight: 800, cursor: "pointer", fontSize: 13 }}>
+                    Upload Photo
+                    <input type="file" accept="image/*" onChange={e => uploadAvatar(e.target.files[0])} style={{ display: "none" }} />
+                  </label>
+                </div>
                 <button onClick={saveProfile} disabled={saving} style={{ background: "linear-gradient(135deg,#1e7e34,#28a745)", color: "#fff", border: "none", borderRadius: 12, padding: "12px 24px", fontWeight: 800, cursor: "pointer", fontSize: 15 }}>{saving ? "Saving…" : "Save Changes"}</button>
               </div>
             </div>
@@ -561,10 +854,49 @@ function Dashboard({ user, onClose, onSignOut, showToast, cart, cartTotal }) {
 
           {/* Wishlist tab */}
           {activeTab === "wishlist" && (
-            <div style={{ textAlign: "center", padding: "40px 20px", color: "#bbb" }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>❤️</div>
-              <div style={{ fontWeight: 700 }}>Your wishlist</div>
-              <div style={{ fontSize: 14, marginTop: 8 }}>Items you heart on the shop page appear here.</div>
+            wishedProducts.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px 20px", color: "#bbb" }}>
+                <div style={{ fontSize: 48, marginBottom: 12 }}>❤️</div>
+                <div style={{ fontWeight: 700 }}>Your wishlist</div>
+                <div style={{ fontSize: 14, marginTop: 8 }}>Items you heart on the shop page appear here.</div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 14 }}>
+                {wishedProducts.map(p => (
+                  <div key={p.id} style={{ background: "#fff", border: "1.5px solid #e8f5e9", borderRadius: 14, padding: 14, display: "flex", gap: 12, alignItems: "center" }}>
+                    <img src={proxyImg(p.img)} alt={p.name} style={{ width: 58, height: 58, borderRadius: 12, objectFit: "cover", background: "#f1f8e9" }} />
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 14, lineHeight: 1.25 }}>{p.name}</div>
+                      <div style={{ color: "#1e7e34", fontWeight: 900, marginTop: 5 }}>£{p.price.toFixed(2)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+
+          {/* Settings tab */}
+          {activeTab === "settings" && (
+            <div>
+              <h3 style={{ fontWeight: 800, fontSize: 18, marginBottom: 16 }}>⚙️ Settings</h3>
+              <div style={{ background: "#fff", borderRadius: 14, padding: 20, border: "1.5px solid #e8f5e9", marginBottom: 16 }}>
+                <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16, fontWeight: 700 }}>
+                  Email offers and restock alerts
+                  <input type="checkbox" checked={settings.promos} onChange={e => setSettings(s => ({ ...s, promos: e.target.checked }))} />
+                </label>
+                <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16, fontWeight: 700 }}>
+                  SMS delivery updates
+                  <input type="checkbox" checked={settings.sms} onChange={e => setSettings(s => ({ ...s, sms: e.target.checked }))} />
+                </label>
+                <label style={{ display: "block", fontWeight: 700, marginBottom: 6, fontSize: 14 }}>Delivery Notes</label>
+                <textarea value={settings.deliveryNotes} onChange={e => setSettings(s => ({ ...s, deliveryNotes: e.target.value }))} placeholder="Gate code, preferred delivery time, or cooking staples you buy often" style={{ width: "100%", minHeight: 90, padding: 12, border: "1.5px solid #e0e0e0", borderRadius: 10, fontFamily: "inherit", resize: "vertical", marginBottom: 14 }} />
+                <button onClick={() => showToast("✅ Settings saved!")} style={{ background: "#1e7e34", color: "#fff", border: "none", borderRadius: 12, padding: "12px 20px", fontWeight: 800, cursor: "pointer" }}>Save Settings</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
+                {["Manage addresses", "Payment methods", "Help centre"].map(item => (
+                  <button key={item} style={{ background: "#f1f8e9", color: "#1e7e34", border: "1.5px solid #c8e6c9", borderRadius: 12, padding: 14, fontWeight: 800, cursor: "pointer" }}>{item}</button>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -575,6 +907,112 @@ function Dashboard({ user, onClose, onSignOut, showToast, cart, cartTotal }) {
         </div>
       </div>
     </>
+  );
+}
+
+// ─── FORGOT PASSWORD PAGE ───────────────────────────────────────────────────
+function ForgotPasswordPage({ showToast }) {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  const inputStyle = { width: "100%", padding: "13px 14px", border: "1.5px solid #dcebdc", borderRadius: 10, fontSize: 15, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 14, background: "#fff" };
+
+  const sendResetLink = async () => {
+    setErr("");
+    if (!email) { setErr("Enter your email address first."); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/?page=reset-password`,
+    });
+    setLoading(false);
+    if (error) { setErr(error.message); return; }
+    showToast("✅ Password reset link sent. Check your email.");
+  };
+
+  return (
+    <div style={{ maxWidth: 620, margin: "0 auto", padding: "58px 20px 80px" }}>
+      <div style={{ background: "#fff", border: "1.5px solid #e8f5e9", borderRadius: 18, overflow: "hidden", boxShadow: "0 18px 45px rgba(30,126,52,0.08)" }}>
+        <div style={{ background: "linear-gradient(135deg,#1e7e34,#28a745)", color: "#fff", padding: "28px 26px" }}>
+          <div style={{ fontSize: 13, fontWeight: 800, opacity: 0.84, marginBottom: 7 }}>Account Recovery</div>
+          <h2 style={{ fontSize: "clamp(24px,4vw,34px)", fontWeight: 900, margin: 0 }}>Forgot Password</h2>
+          <p style={{ margin: "10px 0 0", opacity: 0.86, lineHeight: 1.6 }}>Enter your account email and Supabase will send you a secure reset link.</p>
+        </div>
+
+        <div style={{ padding: 26 }}>
+          <label style={{ display: "block", fontWeight: 800, marginBottom: 6 }}>Email Address</label>
+          <input style={inputStyle} placeholder="Email address" type="email" value={email} onChange={e => setEmail(e.target.value)} />
+          {err && <div style={{ color: "#c62828", fontSize: 13, marginBottom: 14, background: "#fce8e8", padding: "10px 12px", borderRadius: 8 }}>{err}</div>}
+          <button onClick={sendResetLink} disabled={loading} style={{ width: "100%", background: "linear-gradient(135deg,#1e7e34,#28a745)", color: "#fff", border: "none", borderRadius: 12, padding: 15, fontWeight: 900, fontSize: 16, cursor: "pointer" }}>
+            {loading ? "Sending..." : "Send Reset Link"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── RESET PASSWORD PAGE ────────────────────────────────────────────────────
+function ResetPasswordPage({ showToast, onPasswordSaved }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [hasRecoverySession, setHasRecoverySession] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setHasRecoverySession(Boolean(session));
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setHasRecoverySession(Boolean(session));
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const inputStyle = { width: "100%", padding: "13px 14px", border: "1.5px solid #dcebdc", borderRadius: 10, fontSize: 15, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 14, background: "#fff" };
+
+  const saveNewPassword = async () => {
+    setErr("");
+    if (newPassword.length < 6) { setErr("Password must be at least 6 characters."); return; }
+    if (newPassword !== confirmPassword) { setErr("Passwords do not match."); return; }
+    setLoading(true);
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+    setLoading(false);
+    if (error) { setErr(error.message); return; }
+    showToast("✅ Password updated in Supabase!");
+    if (window.history?.replaceState) window.history.replaceState({}, "", window.location.origin);
+    onPasswordSaved(data?.user ?? null);
+  };
+
+  return (
+    <div style={{ maxWidth: 620, margin: "0 auto", padding: "58px 20px 80px" }}>
+      <div style={{ background: "#fff", border: "1.5px solid #e8f5e9", borderRadius: 18, overflow: "hidden", boxShadow: "0 18px 45px rgba(30,126,52,0.08)" }}>
+        <div style={{ background: "linear-gradient(135deg,#1e7e34,#28a745)", color: "#fff", padding: "28px 26px" }}>
+          <div style={{ fontSize: 13, fontWeight: 800, opacity: 0.84, marginBottom: 7 }}>Account Recovery</div>
+          <h2 style={{ fontSize: "clamp(24px,4vw,34px)", fontWeight: 900, margin: 0 }}>Create New Password</h2>
+          <p style={{ margin: "10px 0 0", opacity: 0.86, lineHeight: 1.6 }}>Enter and confirm your new password. This page opens from the reset link sent to your email.</p>
+        </div>
+
+        <div style={{ padding: 26 }}>
+          <label style={{ display: "block", fontWeight: 800, marginBottom: 6 }}>New Password</label>
+          <input style={inputStyle} placeholder="Create new password" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+          <label style={{ display: "block", fontWeight: 800, marginBottom: 6 }}>Confirm Password</label>
+          <input style={inputStyle} placeholder="Confirm new password" type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+
+          {err && <div style={{ color: "#c62828", fontSize: 13, marginBottom: 14, background: "#fce8e8", padding: "10px 12px", borderRadius: 8 }}>{err}</div>}
+          {!hasRecoverySession && (
+            <div style={{ color: "#8a6d1d", background: "#fff8dc", border: "1.5px solid #f4e3a0", borderRadius: 10, padding: "10px 12px", fontSize: 13, lineHeight: 1.55, marginBottom: 14 }}>
+              Open the reset link from your email before saving a new password.
+            </div>
+          )}
+
+          <button onClick={saveNewPassword} disabled={loading || !hasRecoverySession} style={{ width: "100%", background: hasRecoverySession ? "linear-gradient(135deg,#1e7e34,#28a745)" : "#b8c8b8", color: "#fff", border: "none", borderRadius: 12, padding: 15, fontWeight: 900, fontSize: 16, cursor: hasRecoverySession ? "pointer" : "not-allowed" }}>
+            {loading ? "Saving..." : "Save New Password"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -592,28 +1030,77 @@ export default function NaijaBite() {
   const [userLocation, setUserLocation] = useState(null);
   const [nearbyStores, setNearbyStores] = useState([]);
   const [storesLoading, setStoresLoading] = useState(false);
+  const [storeQuery, setStoreQuery] = useState("African Nigerian Caribbean food store");
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [orderDone, setOrderDone] = useState(false);
   // ── Auth state ──
   const [authUser, setAuthUser] = useState(null);
-  const [authModal, setAuthModal] = useState(null); // null | "login" | "signup"
+  const [authModal, setAuthModal] = useState(null); // null | "login" | "signup" | "reset-password"
   const [dashOpen, setDashOpen] = useState(false);
+  const [profile, setProfile] = useState(null);
 
   // Listen for Supabase auth changes
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const requestedPage = new URLSearchParams(window.location.search).get("page");
+    // Always load home by default unless a specific reset route is requested
+    if (requestedPage === "forgot-password" || requestedPage === "reset-password") setPage(requestedPage);
+    else setPage("home");
+
+    // Check session and respect "keepLogged" stored preference
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      try {
+        const keep = localStorage.getItem("keepLogged");
+        if (session?.user && !keep) {
+          // A session exists but user didn't opt to keep logged in -> sign out to require login
+          await supabase.auth.signOut();
+          setAuthUser(null);
+          setAuthModal("login");
+          return;
+        }
+      } catch (e) {
+        // ignore localStorage errors
+      }
       setAuthUser(session?.user ?? null);
+      if (!session?.user) setAuthModal("login");
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setAuthUser(session?.user ?? null);
+      if (event === "PASSWORD_RECOVERY") {
+        setAuthModal(null);
+        setPage("reset-password");
+        return;
+      }
+      if (event === "SIGNED_IN" && session?.user) {
+        setAuthModal(null);
+        setPage("account");
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
 
+  // Fetch profile row when authUser changes
+  useEffect(() => {
+    if (!authUser) { setProfile(null); return; }
+    const fallbackProfile = { email: authUser.email, full_name: displayNameFromUser(authUser), ...readLocalProfile(authUser.id) };
+    setProfile(fallbackProfile);
+    supabase.from("profiles").select("*").eq("id", authUser.id).single()
+      .then(({ data }) => {
+        if (data) {
+          const merged = { ...fallbackProfile, ...data };
+          setProfile(merged);
+          saveLocalProfile(authUser.id, merged);
+        }
+      })
+      .catch(() => {});
+  }, [authUser]);
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setAuthUser(null);
+    setProfile(null);
     setDashOpen(false);
+    setPage("home");
+    try { localStorage.removeItem("keepLogged"); } catch {}
     showToast("👋 Signed out. See you soon!");
   };
 
@@ -649,86 +1136,118 @@ export default function NaijaBite() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
-  // Fetch nearby African / grocery stores from OpenStreetMap Overpass API
-  const fetchNearbyStores = async (lat, lng) => {
+  const normalizeSupabaseStore = (row, lat, lng) => {
+    const storeLat = Number(row.latitude ?? row.lat);
+    const storeLon = Number(row.longitude ?? row.lng ?? row.lon);
+    const dist = Number.isFinite(storeLat) && Number.isFinite(storeLon) ? getDistanceMiles(lat, lng, storeLat, storeLon) : Infinity;
+    return {
+      id: `supabase-${row.id}`,
+      source: "supabase",
+      name: row.name || row.store_name || "African Food Store",
+      address: row.address || [row.street, row.city, row.postcode].filter(Boolean).join(", "),
+      category: row.category || row.store_type,
+      tags: row.tags || row.keywords,
+      description: row.description,
+      distance: Number.isFinite(dist) ? `${dist.toFixed(1)} mi` : "",
+      distanceRaw: dist,
+      open: row.open_now ?? row.is_open ?? true,
+      rating: row.rating || 4.6,
+      lat: storeLat,
+      lon: storeLon,
+    };
+  };
+
+  const fetchSupabaseStores = async (lat, lng, queryText) => {
+    const { data, error } = await supabase.from("stores").select("*");
+    if (error || !data) return [];
+    return data
+      .map(row => normalizeSupabaseStore(row, lat, lng))
+      .filter(store => store.distanceRaw <= 15 && isRelevantFoodStore(store, queryText));
+  };
+
+  // Fetch nearby African / food stores from OpenStreetMap Overpass API and Supabase.
+  const fetchNearbyStores = async (lat, lng, queryText = storeQuery) => {
     setStoresLoading(true);
     setNearbyStores([]);
-    const radius = 5000; // 5 km
-    // Query for supermarkets, convenience stores, and shops tagged with African/Nigerian keywords
+    const radius = 8000;
+    const shopTypes = FOOD_SHOP_TYPES.join("|");
+    const signalRegex = "african|afro|nigeria|nigerian|naija|lagos|ghana|ghanaian|caribbean|jamaican|tropical|world food|world foods|halal|plantain|yam|cassava|garri|egusi|suya|palm oil|spice|spices|market|foods|grocery|supermarket|cash";
     const query = `
       [out:json][timeout:25];
       (
-        node["shop"="supermarket"](around:${radius},${lat},${lng});
-        node["shop"="convenience"](around:${radius},${lat},${lng});
-        node["shop"="grocery"](around:${radius},${lat},${lng});
-        node["shop"="deli"](around:${radius},${lat},${lng});
-        node["shop"="general"](around:${radius},${lat},${lng});
-        node["cuisine"~"african|nigerian|caribbean",i](around:${radius},${lat},${lng});
-        node["name"~"african|nigeria|naija|lagos|ghana|caribbean|halal",i](around:${radius},${lat},${lng});
+        nwr["shop"~"${shopTypes}",i]["name"~"${signalRegex}",i](around:${radius},${lat},${lng});
+        nwr["name"~"${signalRegex}",i](around:${radius},${lat},${lng});
+        nwr["cuisine"~"african|nigerian|ghanaian|caribbean|jamaican",i](around:${radius},${lat},${lng});
       );
-      out body 30;
+      out center tags 50;
     `;
     try {
-      const res = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: query,
-      });
-      const data = await res.json();
-      const elements = data.elements || [];
-
-      // Reverse-geocode each result to get a readable address via Nominatim
-      const storePromises = elements.slice(0, 12).map(async (el, idx) => {
-        const dist = getDistanceMiles(lat, lng, el.lat, el.lon);
+      const [osmResponse, supabaseStores] = await Promise.all([
+        fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: query }).then(res => res.json()),
+        fetchSupabaseStores(lat, lng, queryText),
+      ]);
+      const elements = osmResponse.elements || [];
+      const osmStores = elements.map((el, idx) => {
+        const storeLat = Number(el.lat ?? el.center?.lat);
+        const storeLon = Number(el.lon ?? el.center?.lon);
+        if (!Number.isFinite(storeLat) || !Number.isFinite(storeLon)) return null;
         const tags = el.tags || {};
-        const name = tags.name || tags["name:en"] || "Unnamed Store";
-        // Build address from OSM tags if available, else reverse-geocode
-        let address = [tags["addr:housenumber"], tags["addr:street"], tags["addr:city"]]
+        const dist = getDistanceMiles(lat, lng, storeLat, storeLon);
+        const name = tags.name || tags["name:en"] || "African Food Store";
+        const address = [tags["addr:housenumber"], tags["addr:street"], tags["addr:city"], tags["addr:postcode"]]
           .filter(Boolean)
-          .join(", ");
-        if (!address) {
-          try {
-            const geoRes = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?lat=${el.lat}&lon=${el.lon}&format=json`,
-              { headers: { "Accept-Language": "en" } }
-            );
-            const geoData = await geoRes.json();
-            address = geoData.display_name
-              ? geoData.display_name.split(",").slice(0, 3).join(",")
-              : `${el.lat.toFixed(4)}, ${el.lon.toFixed(4)}`;
-          } catch {
-            address = `${el.lat.toFixed(4)}, ${el.lon.toFixed(4)}`;
-          }
-        }
-        // Determine open/closed from OSM opening_hours if present (simple heuristic)
+          .join(", ") || tags["addr:full"] || `${storeLat.toFixed(4)}, ${storeLon.toFixed(4)}`;
         const ohTag = tags["opening_hours"] || "";
-        const isOpen = ohTag ? !ohTag.toLowerCase().includes("off") : Math.random() > 0.3;
         return {
-          id: el.id || idx,
+          id: `osm-${el.type || "node"}-${el.id || idx}`,
+          source: "osm",
           name,
           address,
+          category: tags.shop || tags.amenity || "food store",
+          shop: tags.shop,
+          cuisine: tags.cuisine,
+          tags: Object.values(tags).join(" "),
           distance: `${dist.toFixed(1)} mi`,
           distanceRaw: dist,
-          open: isOpen,
-          rating: parseFloat((4.2 + Math.random() * 0.8).toFixed(1)),
-          lat: el.lat,
-          lon: el.lon,
+          open: ohTag ? !ohTag.toLowerCase().includes("off") : true,
+          rating: parseFloat((4.2 + Math.random() * 0.7).toFixed(1)),
+          lat: storeLat,
+          lon: storeLon,
         };
-      });
+      }).filter(store => store && store.distanceRaw <= 15 && isRelevantFoodStore(store, queryText));
 
-      const stores = (await Promise.all(storePromises))
-        .filter((s) => s.name !== "Unnamed Store" || s.address)
+      const stores = mergeStores([...supabaseStores, ...osmStores])
         .sort((a, b) => a.distanceRaw - b.distanceRaw)
-        .slice(0, 8);
+        .slice(0, 12);
 
       setNearbyStores(stores);
-      if (stores.length === 0) showToast("⚠️ No stores found nearby — try a wider area");
+      if (stores.length === 0) showToast("⚠️ No matching African food stores found nearby");
     } catch (err) {
-      console.error("OSM fetch error:", err);
+      console.error("Store locator fetch error:", err);
       showToast("⚠️ Could not load nearby stores");
     } finally {
       setStoresLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!userLocation) return;
+    const channel = supabase
+      .channel("nearby-african-food-stores")
+      .on("postgres_changes", { event: "*", schema: "public", table: "stores" }, (payload) => {
+        if (payload.eventType === "DELETE") {
+          setNearbyStores(prev => prev.filter(store => store.id !== `supabase-${payload.old?.id}`));
+          return;
+        }
+        const nextStore = normalizeSupabaseStore(payload.new || {}, userLocation.lat, userLocation.lng);
+        if (!isRelevantFoodStore(nextStore, storeQuery) || nextStore.distanceRaw > 15) return;
+        setNearbyStores(prev => mergeStores([nextStore, ...prev.filter(store => store.id !== nextStore.id)])
+          .sort((a, b) => a.distanceRaw - b.distanceRaw)
+          .slice(0, 12));
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userLocation, storeQuery]);
 
   const locateUser = () => {
     setLocationLoading(true);
@@ -897,29 +1416,41 @@ export default function NaijaBite() {
   const renderStores = () => (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "48px 20px" }}>
       <h2 style={{ fontSize: "clamp(22px,4vw,34px)", fontWeight: 900, color: "#1a2e1a", marginBottom: 8 }}>📍 Find African Stores Near You</h2>
-      <p style={{ color: "#777", marginBottom: 32, fontSize: 15 }}>Locate the nearest African food store using your current location</p>
-      <div style={{ background: "linear-gradient(135deg,#e8f5e9,#f1f8e9)", borderRadius: 20, height: 340, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", border: "2px dashed #a5d6a7", marginBottom: 32, gap: 16, textAlign: "center", padding: 24 }}>
-        <div style={{ fontSize: 52 }}>🗺️</div>
-        <div style={{ fontWeight: 700, fontSize: 22 }}>Store Locator Map</div>
-        {userLocation ? (
-          <div style={{ background: "#e8f5e9", borderRadius: 12, padding: "10px 24px", color: "#1e7e34", fontWeight: 700 }}>✅ Location active — showing stores near you</div>
-        ) : (
-          <p style={{ color: "#777", maxWidth: 400, lineHeight: 1.65, margin: 0, fontSize: 14 }}>
-            Enable location to find African stores near you.<br />
-            <span style={{ color: "#bbb", fontSize: 12 }}>Powered by OpenStreetMap · Overpass API</span>
-          </p>
-        )}
-        <button onClick={locateUser} disabled={locationLoading}
-          style={{ background: "#1e7e34", color: "#fff", border: "none", borderRadius: 12, padding: "12px 28px", fontSize: 15, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
-          <Icon name="locate" size={18} />{locationLoading ? "Locating..." : userLocation ? "Update Location" : "Use My Location"}
+      <p style={{ color: "#777", marginBottom: 22, fontSize: 15 }}>Use your current location to show nearby African, Nigerian, Caribbean, halal, tropical, and world-food stores.</p>
+
+      <div style={{ background: "#fff", border: "1.5px solid #e8f5e9", borderRadius: 16, padding: 16, marginBottom: 18, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 12, alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#f9fdf9", border: "1.5px solid #dcebdc", borderRadius: 12, padding: "0 12px" }}>
+          <Icon name="search" size={18} />
+          <input
+            value={storeQuery}
+            onChange={e => setStoreQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && userLocation) fetchNearbyStores(userLocation.lat, userLocation.lng, storeQuery); }}
+            placeholder="African food, Nigerian, Caribbean, halal..."
+            style={{ width: "100%", border: "none", outline: "none", background: "transparent", padding: "13px 0", fontSize: 15, fontFamily: "inherit" }}
+          />
+        </div>
+        <button
+          onClick={() => userLocation ? fetchNearbyStores(userLocation.lat, userLocation.lng, storeQuery) : locateUser()}
+          disabled={storesLoading || locationLoading}
+          style={{ background: "#1e7e34", color: "#fff", border: "none", borderRadius: 12, padding: "13px 18px", fontSize: 14, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          {storesLoading ? "Filtering..." : "Apply Filter"}
         </button>
       </div>
+
+      <LeafletStoreMap
+        userLocation={userLocation}
+        stores={nearbyStores}
+        loading={locationLoading || storesLoading}
+        onUseLocation={locateUser}
+      />
+
       <h3 style={{ fontWeight: 800, fontSize: 20, marginBottom: 20 }}>Nearby Stores</h3>
       {storesLoading && (
         <div style={{ textAlign: "center", padding: "40px 20px", color: "#777" }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>🔍</div>
-          <div style={{ fontWeight: 700, fontSize: 16 }}>Searching OpenStreetMap for nearby stores…</div>
-          <div style={{ fontSize: 13, color: "#bbb", marginTop: 6 }}>This may take a few seconds</div>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>Searching OpenStreetMap and Supabase for nearby stores…</div>
+          <div style={{ fontSize: 13, color: "#bbb", marginTop: 6 }}>Filtering out unrelated places</div>
         </div>
       )}
       {!storesLoading && !userLocation && (
@@ -949,7 +1480,10 @@ export default function NaijaBite() {
                 <span style={{ display: "inline-block", borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 700, background: s.open ? "#e8f5e9" : "#fce8e8", color: s.open ? "#1e7e34" : "#c62828", flexShrink: 0 }}>{s.open ? "Open" : "Closed"}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 14, alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 4, color: "#f4c430" }}><Icon name="star" size={14} /><span style={{ color: "#555", fontWeight: 600, fontSize: 14 }}>{s.rating}</span></div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#f4c430" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Icon name="star" size={14} /><span style={{ color: "#555", fontWeight: 600, fontSize: 14 }}>{s.rating}</span></span>
+                  <span style={{ color: "#aaa", fontSize: 11, fontWeight: 800, textTransform: "uppercase" }}>{s.source === "supabase" ? "Live" : "OSM"}</span>
+                </div>
                 <span style={{ background: "#e8f5e9", color: "#1e7e34", borderRadius: 20, padding: "4px 12px", fontSize: 13, fontWeight: 700 }}>{s.distance}</span>
               </div>
               <button
@@ -1057,22 +1591,41 @@ export default function NaijaBite() {
             <span style={{ fontSize: 24, fontWeight: 900, color: "#1e7e34" }}>Naija<span style={{ color: "#f4c430" }}>Bite</span></span>
           </div>
           <div className="dnav" style={{ display: "none", gap: 4, alignItems: "center" }}>
-            {[["home","Home"],["shop","Shop"],["stores","Find Stores"],["about","About"]].map(([id,label]) => (
+            {[["home","Home"],["shop","Shop"],["stores","Find Stores"],["about","About"], ...(authUser ? [["account","Dashboard"]] : [])].map(([id,label]) => (
               <button key={id} onClick={() => nav(id)} style={{ padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontWeight: page===id ? 700 : 500, fontSize: 15, color: page===id ? "#1e7e34" : "#444", background: page===id ? "#e8f5e9" : "transparent", border: "none", transition: "all 0.2s" }}>
                 {label}
               </button>
             ))}
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            {/* Auth: show Login/Sign Up OR profile avatar */}
-            {authUser ? (
-              <button onClick={() => setDashOpen(true)} title="My Account" style={{ width: 40, height: 40, borderRadius: "50%", background: "linear-gradient(135deg,#1e7e34,#28a745)", color: "#fff", border: "none", cursor: "pointer", fontWeight: 900, fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                {(authUser.user_metadata?.full_name || authUser.email || "?").split(" ").map(n => n[0]).join("").toUpperCase().slice(0,2)}
-              </button>
-            ) : (
-              <div style={{ display: "flex", gap: 8 }} className="dnav">
-                <button onClick={() => setAuthModal("login")} style={{ padding: "9px 16px", borderRadius: 10, border: "1.5px solid #1e7e34", background: "transparent", color: "#1e7e34", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>Sign In</button>
-                <button onClick={() => setAuthModal("signup")} style={{ padding: "9px 16px", borderRadius: 10, border: "none", background: "#1e7e34", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>Sign Up</button>
+            {/* Profile circle — always visible; opens dashboard if logged in, auth modal if not */}
+            <button
+              onClick={() => authUser ? nav("account") : setAuthModal("login")}
+              title={authUser ? "My Account Dashboard" : "Sign In"}
+              style={{
+                width: authUser ? 74 : 40, minHeight: authUser ? 54 : 40, borderRadius: authUser ? 12 : "50%",
+                background: authUser ? "#f9fdf9" : "#f1f8e9",
+                color: "#1e7e34",
+                border: authUser ? "1.5px solid #c8e6c9" : "2px solid #1e7e34",
+                cursor: "pointer", fontWeight: 900, fontSize: authUser ? 11 : 20,
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, flexShrink: 0,
+                transition: "all 0.2s", padding: authUser ? "4px 5px" : 0,
+              }}
+            >
+              <span style={{ width: 31, height: 31, borderRadius: "50%", overflow: "hidden", background: authUser ? "linear-gradient(135deg,#1e7e34,#f4c430)" : "transparent", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: authUser ? 12 : 20 }}>
+                {authUser && profile?.avatar_url ? (
+                  <img src={profile.avatar_url} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  authUser ? getInitials(displayNameFromUser(authUser, profile)) : "👤"
+                )}
+              </span>
+              {authUser && <span style={{ maxWidth: 64, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.1 }}>{displayNameFromUser(authUser, profile)}</span>}
+            </button>
+            {/* Desktop Sign In / Sign Up text links (only when logged out) */}
+            {!authUser && (
+              <div style={{ display: "flex", gap: 6 }} className="dnav">
+                <button onClick={() => setAuthModal("login")} style={{ padding: "8px 14px", borderRadius: 8, border: "1.5px solid #1e7e34", background: "transparent", color: "#1e7e34", fontWeight: 700, cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>Sign In</button>
+                <button onClick={() => setAuthModal("signup")} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "#1e7e34", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>Sign Up</button>
               </div>
             )}
             <button onClick={() => setCartOpen(true)} style={{ position: "relative", background: "#1e7e34", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 700, fontSize: 15 }}>
@@ -1091,20 +1644,23 @@ export default function NaijaBite() {
         <>
           <div onClick={() => setMobileMenuOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 98 }} />
           <div style={{ position: "fixed", top: 113, left: 0, right: 0, background: "#fff", zIndex: 99, padding: 16, borderBottom: "2px solid #e8f5e9", display: "flex", flexDirection: "column", gap: 4 }}>
-            {[["home","Home"],["shop","Shop"],["stores","Find Stores"],["about","About"]].map(([id,label]) => (
+            {[["home","Home"],["shop","Shop"],["stores","Find Stores"],["about","About"], ...(authUser ? [["account","Dashboard"]] : [])].map(([id,label]) => (
               <button key={id} onClick={() => nav(id)} style={{ padding: "12px 16px", borderRadius: 8, cursor: "pointer", fontWeight: page===id ? 700 : 500, fontSize: 16, color: page===id ? "#1e7e34" : "#333", background: page===id ? "#e8f5e9" : "transparent", border: "none", textAlign: "left" }}>
                 {label}
               </button>
             ))}
             {!authUser && (
               <div style={{ display: "flex", gap: 8, padding: "8px 0" }}>
-                <button onClick={() => { setMobileMenuOpen(false); setAuthModal("login"); }} style={{ flex: 1, padding: 12, border: "1.5px solid #1e7e34", background: "transparent", color: "#1e7e34", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>Sign In</button>
-                <button onClick={() => { setMobileMenuOpen(false); setAuthModal("signup"); }} style={{ flex: 1, padding: 12, border: "none", background: "#1e7e34", color: "#fff", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>Sign Up</button>
+                <button onClick={() => { setMobileMenuOpen(false); setAuthModal("login"); }} style={{ flex: 1, padding: 12, border: "1.5px solid #1e7e34", background: "transparent", color: "#1e7e34", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>👤 Sign In</button>
+                <button onClick={() => { setMobileMenuOpen(false); setAuthModal("signup"); }} style={{ flex: 1, padding: 12, border: "none", background: "#1e7e34", color: "#fff", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>Sign Up Free</button>
               </div>
             )}
             {authUser && (
-              <button onClick={() => { setMobileMenuOpen(false); setDashOpen(true); }} style={{ padding: "12px 16px", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 16, color: "#1e7e34", background: "#e8f5e9", border: "none", textAlign: "left" }}>
-                👤 My Account
+              <button onClick={() => { setMobileMenuOpen(false); nav("account"); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 15, color: "#1e7e34", background: "#e8f5e9", border: "1.5px solid #c8e6c9", textAlign: "left" }}>
+                <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#1e7e34,#28a745)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 14, flexShrink: 0, overflow: "hidden" }}>
+                  {profile?.avatar_url ? <img src={profile.avatar_url} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : getInitials(displayNameFromUser(authUser, profile))}
+                </div>
+                <span>{displayNameFromUser(authUser, profile)} Dashboard</span>
               </button>
             )}
           </div>
@@ -1117,6 +1673,42 @@ export default function NaijaBite() {
         {page === "shop" && renderShop()}
         {page === "stores" && renderStores()}
         {page === "about" && renderAbout()}
+        {page === "forgot-password" && (
+          <ForgotPasswordPage
+            showToast={showToast}
+          />
+        )}
+        {page === "reset-password" && (
+          <ResetPasswordPage
+            showToast={showToast}
+            onPasswordSaved={(user) => {
+              if (user) setAuthUser(user);
+              nav("account");
+            }}
+          />
+        )}
+        {page === "account" && (
+          authUser ? (
+            <Dashboard
+              user={authUser}
+              onClose={() => setDashOpen(false)}
+              onSignOut={handleSignOut}
+              showToast={showToast}
+              cart={cart}
+              cartTotal={cartTotal}
+              wishlist={wishlist}
+              embedded
+              onProfileUpdate={(p) => setProfile(p)}
+            />
+          ) : (
+            <div style={{ maxWidth: 520, margin: "0 auto", padding: "72px 20px", textAlign: "center" }}>
+              <div style={{ fontSize: 48, marginBottom: 14 }}>👤</div>
+              <h2 style={{ fontWeight: 900, color: "#1a2e1a", marginBottom: 10 }}>Sign in to view your dashboard</h2>
+              <p style={{ color: "#777", lineHeight: 1.7, marginBottom: 22 }}>Your profile, photo, orders, wishlist, and account settings will appear here.</p>
+              <button onClick={() => setAuthModal("login")} style={{ background: "#1e7e34", color: "#fff", border: "none", borderRadius: 12, padding: "13px 26px", fontWeight: 800, cursor: "pointer" }}>Sign In</button>
+            </div>
+          )
+        )}
       </main>
 
       {/* Footer */}
@@ -1206,8 +1798,9 @@ export default function NaijaBite() {
         <AuthModal
           mode={authModal}
           onClose={() => setAuthModal(null)}
-          onSuccess={() => setAuthModal(null)}
+          onSuccess={(user) => { setAuthModal(null); if (user) { setAuthUser(user); nav("account"); } }}
           showToast={showToast}
+          onForgotPassword={() => { setAuthModal(null); nav("forgot-password"); }}
         />
       )}
 
@@ -1220,6 +1813,8 @@ export default function NaijaBite() {
           showToast={showToast}
           cart={cart}
           cartTotal={cartTotal}
+          wishlist={wishlist}
+          onProfileUpdate={(p) => setProfile(p)}
         />
       )}
 
