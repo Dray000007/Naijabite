@@ -547,11 +547,11 @@ function AuthModal({ mode, onClose, onSuccess, showToast, onForgotPassword }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const title = {
-    login: "Sign In",
+    login: "Login",
     signup: "Create Account",
     forgot: "Reset Password",
     "reset-password": "Choose New Password",
-  }[tab] || "Sign In";
+  }[tab] || "Login";
 
   const inputStyle = { width: "100%", padding: "12px 14px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 15, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 14 };
   const btnStyle = (bg) => ({ width: "100%", padding: 14, background: bg, color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: "pointer", marginTop: 4 });
@@ -624,7 +624,7 @@ function AuthModal({ mode, onClose, onSuccess, showToast, onForgotPassword }) {
         <div style={{ display: "flex", background: "#f5f5f5", borderRadius: 10, padding: 4, marginBottom: 20 }}>
           {["login","signup"].map(t => (
             <button key={t} onClick={() => { setTab(t); setErr(""); }} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: tab === t ? "#fff" : "transparent", fontWeight: tab === t ? 800 : 500, cursor: "pointer", boxShadow: tab === t ? "0 2px 8px rgba(0,0,0,0.1)" : "none", fontSize: 14 }}>
-              {t === "login" ? "Sign In" : "Sign Up"}
+              {t === "login" ? "Login" : "Sign Up"}
             </button>
           ))}
         </div>
@@ -651,7 +651,7 @@ function AuthModal({ mode, onClose, onSuccess, showToast, onForgotPassword }) {
           disabled={loading}
           style={btnStyle("linear-gradient(135deg,#1e7e34,#28a745)")}
         >
-          {loading ? "Please wait…" : tab === "login" ? "Sign In" : tab === "signup" ? "Create Account" : tab === "forgot" ? "Send Reset Link" : "Update Password"}
+          {loading ? "Please wait…" : tab === "login" ? "Login" : tab === "signup" ? "Create Account" : tab === "forgot" ? "Send Reset Link" : "Update Password"}
         </button>
         {(tab === "login" || tab === "signup") && (
           <>
@@ -661,7 +661,7 @@ function AuthModal({ mode, onClose, onSuccess, showToast, onForgotPassword }) {
             </button>
           </>
         )}
-        {tab === "forgot" && <p style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: "#aaa" }}>Remembered it? <span onClick={() => setTab("login")} style={{ color: "#1e7e34", cursor: "pointer", fontWeight: 700 }}>Back to sign in</span></p>}
+        {tab === "forgot" && <p style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: "#aaa" }}>Remembered it? <span onClick={() => setTab("login")} style={{ color: "#1e7e34", cursor: "pointer", fontWeight: 700 }}>Back to Login</span></p>}
         {tab === "login" && <p style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: "#aaa" }}>Don't have an account? <span onClick={() => setTab("signup")} style={{ color: "#1e7e34", cursor: "pointer", fontWeight: 700 }}>Sign up free</span></p>}
       </div>
     </>
@@ -1051,17 +1051,16 @@ export default function NaijaBite() {
       try {
         const keep = localStorage.getItem("keepLogged");
         if (session?.user && !keep) {
-          // A session exists but user didn't opt to keep logged in -> sign out to require login
+          // A session exists but user didn't opt to keep logged in -> sign out but do not auto-open auth modal
           await supabase.auth.signOut();
           setAuthUser(null);
-          setAuthModal("login");
+          setAuthModal(null);
           return;
         }
       } catch (e) {
         // ignore localStorage errors
       }
       setAuthUser(session?.user ?? null);
-      if (!session?.user) setAuthModal("login");
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setAuthUser(session?.user ?? null);
@@ -1599,9 +1598,9 @@ export default function NaijaBite() {
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             {/* Profile circle — always visible; opens dashboard if logged in, auth modal if not */}
-            <button
+              <button
               onClick={() => authUser ? nav("account") : setAuthModal("login")}
-              title={authUser ? "My Account Dashboard" : "Sign In"}
+              title={authUser ? "My Account Dashboard" : "Login"}
               style={{
                 width: authUser ? 74 : 40, minHeight: authUser ? 54 : 40, borderRadius: authUser ? 12 : "50%",
                 background: authUser ? "#f9fdf9" : "#f1f8e9",
@@ -1624,7 +1623,7 @@ export default function NaijaBite() {
             {/* Desktop Sign In / Sign Up text links (only when logged out) */}
             {!authUser && (
               <div style={{ display: "flex", gap: 6 }} className="dnav">
-                <button onClick={() => setAuthModal("login")} style={{ padding: "8px 14px", borderRadius: 8, border: "1.5px solid #1e7e34", background: "transparent", color: "#1e7e34", fontWeight: 700, cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>Sign In</button>
+                <button onClick={() => setAuthModal("login")} style={{ padding: "8px 14px", borderRadius: 8, border: "1.5px solid #1e7e34", background: "transparent", color: "#1e7e34", fontWeight: 700, cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>Login</button>
                 <button onClick={() => setAuthModal("signup")} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "#1e7e34", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" }}>Sign Up</button>
               </div>
             )}
@@ -1651,7 +1650,7 @@ export default function NaijaBite() {
             ))}
             {!authUser && (
               <div style={{ display: "flex", gap: 8, padding: "8px 0" }}>
-                <button onClick={() => { setMobileMenuOpen(false); setAuthModal("login"); }} style={{ flex: 1, padding: 12, border: "1.5px solid #1e7e34", background: "transparent", color: "#1e7e34", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>👤 Sign In</button>
+                <button onClick={() => { setMobileMenuOpen(false); setAuthModal("login"); }} style={{ flex: 1, padding: 12, border: "1.5px solid #1e7e34", background: "transparent", color: "#1e7e34", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>👤 Login</button>
                 <button onClick={() => { setMobileMenuOpen(false); setAuthModal("signup"); }} style={{ flex: 1, padding: 12, border: "none", background: "#1e7e34", color: "#fff", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>Sign Up Free</button>
               </div>
             )}
@@ -1703,9 +1702,9 @@ export default function NaijaBite() {
           ) : (
             <div style={{ maxWidth: 520, margin: "0 auto", padding: "72px 20px", textAlign: "center" }}>
               <div style={{ fontSize: 48, marginBottom: 14 }}>👤</div>
-              <h2 style={{ fontWeight: 900, color: "#1a2e1a", marginBottom: 10 }}>Sign in to view your dashboard</h2>
+              <h2 style={{ fontWeight: 900, color: "#1a2e1a", marginBottom: 10 }}>Login to view your dashboard</h2>
               <p style={{ color: "#777", lineHeight: 1.7, marginBottom: 22 }}>Your profile, photo, orders, wishlist, and account settings will appear here.</p>
-              <button onClick={() => setAuthModal("login")} style={{ background: "#1e7e34", color: "#fff", border: "none", borderRadius: 12, padding: "13px 26px", fontWeight: 800, cursor: "pointer" }}>Sign In</button>
+              <button onClick={() => setAuthModal("login")} style={{ background: "#1e7e34", color: "#fff", border: "none", borderRadius: 12, padding: "13px 26px", fontWeight: 800, cursor: "pointer" }}>Login</button>
             </div>
           )
         )}
