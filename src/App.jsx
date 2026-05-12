@@ -201,7 +201,7 @@ const FOOD_SHOP_TYPES = ["supermarket", "convenience", "grocery", "deli", "gener
 
 const storeText = (parts) => parts.filter(Boolean).join(" ").toLowerCase();
 
-const isRelevantFoodStore = (store, query = "") => {
+const isRelevantFoodStore = (store, query = "", allowAny = false) => {
   const text = storeText([
     store.name,
     store.address,
@@ -214,6 +214,7 @@ const isRelevantFoodStore = (store, query = "") => {
   const wanted = query.trim().toLowerCase();
   const hasAfricanSignal = AFRICAN_STORE_KEYWORDS.some(k => text.includes(k));
   const matchesQuery = !wanted || wanted.split(/\s+/).some(word => word.length > 2 && text.includes(word));
+  if (allowAny) return matchesQuery || hasAfricanSignal;
   return hasAfricanSignal && matchesQuery;
 };
 
@@ -329,11 +330,15 @@ function LeafletStoreMap({ userLocation, stores, loading, onUseLocation }) {
     <div style={{ position: "relative", height: "clamp(360px, 52vh, 560px)", borderRadius: 18, overflow: "hidden", border: "1.5px solid #c8e6c9", background: "#e8f5e9", marginBottom: 24 }}>
       <div ref={mapEl} style={{ width: "100%", height: "100%" }} />
       {!userLocation && (
-        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", background: "linear-gradient(180deg,rgba(249,253,249,0.72),rgba(249,253,249,0.36))" }}>
-          <div style={{ background: "#fff", border: "1.5px solid #e8f5e9", borderRadius: 14, padding: 18, textAlign: "center", maxWidth: 330, boxShadow: "0 12px 32px rgba(0,0,0,0.12)" }}>
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(180deg,rgba(249,253,249,0.72),rgba(249,253,249,0.36))" }}>
+          <div style={{ background: "#fff", border: "1.5px solid #e8f5e9", borderRadius: 14, padding: 18, textAlign: "center", maxWidth: 360, boxShadow: "0 12px 32px rgba(0,0,0,0.12)", pointerEvents: "auto" }}>
             <div style={{ fontSize: 34, marginBottom: 8 }}>📍</div>
             <div style={{ fontWeight: 900, marginBottom: 6 }}>Use your location</div>
-            <div style={{ color: "#666", fontSize: 13, lineHeight: 1.55 }}>The map will show African food stores closest to you.</div>
+            <div style={{ color: "#666", fontSize: 13, lineHeight: 1.55, marginBottom: 12 }}>The map will show African food stores closest to you.</div>
+            <button onClick={onUseLocation} disabled={loading}
+              style={{ background: "#1e7e34", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", fontWeight: 800, cursor: "pointer" }}>
+              {loading ? "Locating..." : "Use My Location"}
+            </button>
           </div>
         </div>
       )}
@@ -657,7 +662,7 @@ function AuthModal({ mode, onClose, onSuccess, showToast, onForgotPassword }) {
           <>
             <div style={{ textAlign: "center", margin: "14px 0", color: "#aaa", fontSize: 13 }}>— or —</div>
             <button onClick={handleGoogle} style={{ ...btnStyle("#4285F4"), display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-              <img src="../c8fd260bd00730736bcd50bac2a6b6a5240f678d-removebg-preview.png" alt="Google" style={{ width: 20, height: 20 }} /> Continue with Google
+              <img src="/naijabite logo.jpg" alt="Google" style={{ width: 20, height: 20 }} /> Continue with Google
             </button>
           </>
         )}
@@ -961,11 +966,21 @@ function ResetPasswordPage({ showToast, onPasswordSaved }) {
   const [hasRecoverySession, setHasRecoverySession] = useState(false);
 
   useEffect(() => {
+    // On mount, check if Supabase already established a recovery session
+    // (this happens when the user lands directly from the email link)
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setHasRecoverySession(Boolean(session));
+      if (session?.user) setHasRecoverySession(true);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setHasRecoverySession(Boolean(session));
+
+    // Also listen — Supabase fires PASSWORD_RECOVERY after processing the hash token.
+    // This is the authoritative signal that the user arrived from a reset email.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY" || (event === "SIGNED_IN" && session)) {
+        setHasRecoverySession(true);
+      }
+      if (event === "SIGNED_OUT") {
+        setHasRecoverySession(false);
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -980,7 +995,8 @@ function ResetPasswordPage({ showToast, onPasswordSaved }) {
     const { data, error } = await supabase.auth.updateUser({ password: newPassword });
     setLoading(false);
     if (error) { setErr(error.message); return; }
-    showToast("✅ Password updated in Supabase!");
+    showToast("✅ Password updated successfully!");
+    // Clear the recovery token from the URL so it can't be replayed
     if (window.history?.replaceState) window.history.replaceState({}, "", window.location.origin);
     onPasswordSaved(data?.user ?? null);
   };
@@ -1042,16 +1058,30 @@ export default function NaijaBite() {
   // Listen for Supabase auth changes
   useEffect(() => {
     const requestedPage = new URLSearchParams(window.location.search).get("page");
-    // Always load home by default unless a specific reset route is requested
-    if (requestedPage === "forgot-password" || requestedPage === "reset-password") setPage(requestedPage);
-    else setPage("home");
+    // Detect if this page load came from a Supabase password-reset email link.
+    // Supabase appends #access_token=...&type=recovery to the redirectTo URL.
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const isRecoveryLink = hashParams.get("type") === "recovery" || requestedPage === "reset-password";
 
-    // Check session and respect "keepLogged" stored preference
+    if (isRecoveryLink) {
+      // Show the reset page immediately — do NOT touch the session
+      setPage("reset-password");
+    } else if (requestedPage === "forgot-password") {
+      setPage("forgot-password");
+    } else {
+      setPage("home");
+    }
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      // IMPORTANT: never sign out a recovery session — doing so would destroy
+      // the token that ResetPasswordPage needs to call updateUser().
+      if (isRecoveryLink) {
+        setAuthUser(session?.user ?? null);
+        return;
+      }
       try {
         const keep = localStorage.getItem("keepLogged");
         if (session?.user && !keep) {
-          // A session exists but user didn't opt to keep logged in -> sign out but do not auto-open auth modal
           await supabase.auth.signOut();
           setAuthUser(null);
           setAuthModal(null);
@@ -1062,14 +1092,18 @@ export default function NaijaBite() {
       }
       setAuthUser(session?.user ?? null);
     });
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setAuthUser(session?.user ?? null);
       if (event === "PASSWORD_RECOVERY") {
+        // Supabase fired the recovery event — show the reset page and keep the session alive
+        setAuthUser(session?.user ?? null);
         setAuthModal(null);
         setPage("reset-password");
         return;
       }
-      if (event === "SIGNED_IN" && session?.user) {
+      setAuthUser(session?.user ?? null);
+      // Only redirect to account on a real login, never during a recovery flow
+      if (event === "SIGNED_IN" && session?.user && !isRecoveryLink) {
         setAuthModal(null);
         setPage("account");
       }
@@ -1168,7 +1202,7 @@ export default function NaijaBite() {
   const fetchNearbyStores = async (lat, lng, queryText = storeQuery) => {
     setStoresLoading(true);
     setNearbyStores([]);
-    const radius = 8000;
+    const radius = 12000; // larger default radius (meters)
     const shopTypes = FOOD_SHOP_TYPES.join("|");
     const signalRegex = "african|afro|nigeria|nigerian|naija|lagos|ghana|ghanaian|caribbean|jamaican|tropical|world food|world foods|halal|plantain|yam|cassava|garri|egusi|suya|palm oil|spice|spices|market|foods|grocery|supermarket|cash";
     const query = `
@@ -1215,12 +1249,49 @@ export default function NaijaBite() {
         };
       }).filter(store => store && store.distanceRaw <= 15 && isRelevantFoodStore(store, queryText));
 
-      const stores = mergeStores([...supabaseStores, ...osmStores])
+      // Merge results and prefer closest matches
+      let stores = mergeStores([...supabaseStores, ...osmStores])
         .sort((a, b) => a.distanceRaw - b.distanceRaw)
         .slice(0, 12);
 
+      // If no African-specific matches were found, relax filters and show any nearby food stores
+      if (stores.length === 0 && elements.length > 0) {
+        const fallback = elements.map((el, idx) => {
+          const storeLat = Number(el.lat ?? el.center?.lat);
+          const storeLon = Number(el.lon ?? el.center?.lon);
+          if (!Number.isFinite(storeLat) || !Number.isFinite(storeLon)) return null;
+          const tags = el.tags || {};
+          const dist = getDistanceMiles(lat, lng, storeLat, storeLon);
+          const name = tags.name || tags["name:en"] || "Nearby Food Store";
+          const address = [tags["addr:housenumber"], tags["addr:street"], tags["addr:city"], tags["addr:postcode"]]
+            .filter(Boolean)
+            .join(", ") || tags["addr:full"] || `${storeLat.toFixed(4)}, ${storeLon.toFixed(4)}`;
+          const ohTag = tags["opening_hours"] || "";
+          return {
+            id: `osm-fallback-${el.type || "node"}-${el.id || idx}`,
+            source: "osm",
+            name,
+            address,
+            category: tags.shop || tags.amenity || "food store",
+            shop: tags.shop,
+            cuisine: tags.cuisine,
+            tags: Object.values(tags).join(" "),
+            distance: `${dist.toFixed(1)} mi`,
+            distanceRaw: dist,
+            open: ohTag ? !ohTag.toLowerCase().includes("off") : true,
+            rating: parseFloat((4.2 + Math.random() * 0.7).toFixed(1)),
+            lat: storeLat,
+            lon: storeLon,
+          };
+        }).filter(Boolean).filter(s => s.distanceRaw <= 30); // allow wider fallback radius (miles)
+
+        stores = mergeStores([...supabaseStores, ...fallback])
+          .sort((a, b) => a.distanceRaw - b.distanceRaw)
+          .slice(0, 12);
+        if (stores.length > 0) showToast("⚠️ No African-specific matches — showing nearby food stores instead.");
+      }
+
       setNearbyStores(stores);
-      if (stores.length === 0) showToast("⚠️ No matching African food stores found nearby");
     } catch (err) {
       console.error("Store locator fetch error:", err);
       showToast("⚠️ Could not load nearby stores");
