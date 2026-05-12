@@ -622,7 +622,10 @@ function AuthModal({ mode, onClose, onSuccess, showToast, onForgotPassword }) {
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 400 }} />
       <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", background: "#fff", borderRadius: 20, padding: 32, width: "min(420px,90vw)", zIndex: 401, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-          <span style={{ fontSize: 22, fontWeight: 900 }}>🍛 {title}</span>
+          <span style={{ fontSize: 22, fontWeight: 900, display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <img src="/naijabite logo.jpg" alt="Naijabite" style={{ width: 42, height: 42, borderRadius: 8, objectFit: "contain", background: "transparent", display: "block" }} />
+            {title}
+          </span>
           <button onClick={onClose} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontSize: 16 }}>✕</button>
         </div>
         {tab !== "reset-password" && (
@@ -662,7 +665,13 @@ function AuthModal({ mode, onClose, onSuccess, showToast, onForgotPassword }) {
           <>
             <div style={{ textAlign: "center", margin: "14px 0", color: "#aaa", fontSize: 13 }}>— or —</div>
             <button onClick={handleGoogle} style={{ ...btnStyle("#4285F4"), display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-              <img src="/naijabite logo.jpg" alt="Google" style={{ width: 20, height: 20 }} /> Continue with Google
+              <svg width="20" height="20" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+                <path fill="#4285F4" d="M43.6 20.5H42V20H24v8h11.3c-1.1 3.3-3.9 6.1-7.3 7.4v6h11.8C39.8 38.6 46 30.9 46 24c0-1.6-.2-3.1-.4-3.5z"/>
+                <path fill="#34A853" d="M24 44c5.9 0 10.9-1.9 14.6-5.2l-7-5.4c-2 1.4-4.6 2.2-7.6 2.2-5.8 0-10.7-3.9-12.5-9.2H3.5v5.8C7.2 38.5 15.2 44 24 44z"/>
+                <path fill="#FBBC05" d="M11.5 27.4c-.6-1.9-.9-3.9-.9-6s.3-4.1.9-6V9.6H3.5C1.3 13.3 0 18.4 0 24s1.3 10.7 3.5 14.4l8-5z"/>
+                <path fill="#EA4335" d="M24 10.1c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.8 3.6 29.8 1.6 24 1.6 15.2 1.6 7.2 7.1 3.5 15.6l8 5c1.8-5.2 6.7-9.1 12.5-9.1z"/>
+              </svg>
+              Continue with Google
             </button>
           </>
         )}
@@ -753,7 +762,10 @@ function Dashboard({ user, onClose, onSignOut, showToast, cart, cartTotal, onPro
         {/* Header */}
         <div style={{ background: "linear-gradient(135deg,#1e7e34,#28a745)", padding: "28px 24px 20px", color: "#fff", borderRadius: embedded ? 18 : 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-            <span style={{ fontWeight: 900, fontSize: 18 }}>🍛 My Account Dashboard</span>
+            <span style={{ fontWeight: 900, fontSize: 18, display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <img src="/naijabite logo.jpg" alt="Naijabite" style={{ width: 32, height: 32, borderRadius: 4, objectFit: "contain", background: "transparent", display: "block" }} />
+              My Account Dashboard
+            </span>
             {!embedded && <button onClick={onClose} style={{ background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 8, padding: "6px 10px", color: "#fff", cursor: "pointer", fontSize: 16 }}>✕</button>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -1655,9 +1667,11 @@ export default function NaijaBite() {
 
       {/* Navbar */}
       <nav style={{ background: "#fff", borderBottom: "2px solid #e8f5e9", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 2px 16px rgba(34,100,34,0.07)" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 66 }}>
-          <div onClick={() => nav("home")} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: "linear-gradient(135deg,#1e7e34,#28a745)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🍛</div>
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 72 }}>
+            <div onClick={() => nav("home")} style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
+            <div style={{ width: 64, height: 64, borderRadius: 14, background: "linear-gradient(135deg,#1e7e34,#28a745)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>
+              <img src="/naijabite logo.jpg" alt="Naijabite" style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 14, background: "transparent", display: "block" }} />
+            </div>
             <span style={{ fontSize: 24, fontWeight: 900, color: "#1e7e34" }}>Naija<span style={{ color: "#f4c430" }}>Bite</span></span>
           </div>
           <div className="dnav" style={{ display: "none", gap: 4, alignItems: "center" }}>
@@ -1786,8 +1800,10 @@ export default function NaijaBite() {
         <div style={{ maxWidth: 1200, margin: "0 auto" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 32, marginBottom: 40 }}>
             <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 8, background: "linear-gradient(135deg,#1e7e34,#28a745)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🍛</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                <div style={{ width: 64, height: 64, borderRadius: 12, background: "linear-gradient(135deg,#1e7e34,#28a745)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
+                  <img src="/naijabite logo.jpg" alt="Naijabite" style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 12, background: "transparent", display: "block" }} />
+                </div>
                 <span style={{ color: "#fff", fontWeight: 900, fontSize: 20 }}>Naija<span style={{ color: "#f4c430" }}>Bite</span></span>
               </div>
               <p style={{ fontSize: 13, lineHeight: 1.7, color: "#555" }}>Authentic African food delivered to your door. Connecting the diaspora with home.</p>

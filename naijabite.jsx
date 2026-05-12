@@ -675,7 +675,7 @@ export default function NaijaBite() {
       <nav style={{ background: "#fff", borderBottom: "2px solid #e8f5e9", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 2px 16px rgba(34,100,34,0.07)" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 66 }}>
           <div onClick={() => nav("home")} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: "linear-gradient(135deg,#1e7e34,#28a745)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🍛</div>
+            <img src="/naijabite logo.jpg" alt="Naijabite logo" style={{ width: 56, height: 56, borderRadius: 12, objectFit: "contain", background: "transparent", display: "block" }} />
             <span style={{ fontSize: 24, fontWeight: 900, color: "#1e7e34" }}>Naija<span style={{ color: "#f4c430" }}>Bite</span></span>
           </div>
           <div className="dnav" style={{ display: "none", gap: 4, alignItems: "center" }}>
@@ -725,7 +725,9 @@ export default function NaijaBite() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 32, marginBottom: 40 }}>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 8, background: "linear-gradient(135deg,#1e7e34,#28a745)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🍛</div>
+                <div style={{ width: 36, height: 36, borderRadius: 8, background: "linear-gradient(135deg,#1e7e34,#28a745)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+                  <img src="/naijabite logo.jpg" alt="Naijabite" style={{ width: "100%", height: "auto", objectFit: "contain", borderRadius: 8, background: "transparent", display: "block" }} />
+                </div>
                 <span style={{ color: "#fff", fontWeight: 900, fontSize: 20 }}>Naija<span style={{ color: "#f4c430" }}>Bite</span></span>
               </div>
               <p style={{ fontSize: 13, lineHeight: 1.7, color: "#555" }}>Authentic African food delivered to your door. Connecting the diaspora with home.</p>
